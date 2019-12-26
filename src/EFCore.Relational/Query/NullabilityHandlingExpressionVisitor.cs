@@ -633,12 +633,12 @@ namespace Microsoft.EntityFrameworkCore.Query
             {
                 if (leftNullable)
                 {
-                    left = AddNullConcatenationProtection(left);
+                    left = AddNullConcatenationProtection(left, sqlBinaryExpression.TypeMapping);
                 }
 
                 if (rightNullable)
                 {
-                    right = AddNullConcatenationProtection(right);
+                    right = AddNullConcatenationProtection(right, sqlBinaryExpression.TypeMapping);
                 }
 
                 return sqlBinaryExpression.Update(left, right);
@@ -705,12 +705,12 @@ namespace Microsoft.EntityFrameworkCore.Query
                 ? SimplifyLogicalSqlBinaryExpression(sqlBinaryResult)
                 : result;
 
-            SqlExpression AddNullConcatenationProtection(SqlExpression argument)
+            SqlExpression AddNullConcatenationProtection(SqlExpression argument, RelationalTypeMapping typeMapping)
                 => argument switch
                 {
-                    SqlConstantExpression _ => SqlExpressionFactory.Constant(string.Empty),
-                    SqlParameterExpression _ => SqlExpressionFactory.Constant(string.Empty),
-                    ColumnExpression _ => SqlExpressionFactory.Coalesce(argument, SqlExpressionFactory.Constant(string.Empty)),
+                    SqlConstantExpression _ => SqlExpressionFactory.Constant(string.Empty, typeMapping),
+                    SqlParameterExpression _ => SqlExpressionFactory.Constant(string.Empty, typeMapping),
+                    ColumnExpression _ => SqlExpressionFactory.Coalesce(argument, SqlExpressionFactory.Constant(string.Empty, typeMapping)),
                     _ => argument
                 };
         }
@@ -766,7 +766,7 @@ namespace Microsoft.EntityFrameworkCore.Query
                 // a != true -> !a
                 // a != false -> a
                 return sqlBinaryExpression.OperatorType == ExpressionType.Equal ^ rightTrueFalseValue
-                    ? SqlExpressionFactory.Not(left)
+                    ? OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(left))
                     : left;
             }
 
@@ -867,7 +867,10 @@ namespace Microsoft.EntityFrameworkCore.Query
             }
 
             var leftIsNull = ProcessNullNotNull(SqlExpressionFactory.IsNull(left), leftNullable);
+            var leftIsNotNull = OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(leftIsNull));
+
             var rightIsNull = ProcessNullNotNull(SqlExpressionFactory.IsNull(right), rightNullable);
+            var rightIsNotNull = OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(rightIsNull));
 
             // optimized expansion which doesn't distinguish between null and false
             if (canOptimize
@@ -881,9 +884,11 @@ namespace Microsoft.EntityFrameworkCore.Query
                     IsNullable = true;
                     CanOptimize = canOptimize;
 
-                    return SqlExpressionFactory.OrElse(
-                        SqlExpressionFactory.Equal(left, right),
-                        SqlExpressionFactory.AndAlso(leftIsNull, rightIsNull));
+                    return SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.OrElse(
+                            SqlExpressionFactory.Equal(left, right),
+                            SimplifyLogicalSqlBinaryExpression(
+                                SqlExpressionFactory.AndAlso(leftIsNull, rightIsNull))));
                 }
 
                 if ((leftNullable && !rightNullable)
@@ -907,8 +912,8 @@ namespace Microsoft.EntityFrameworkCore.Query
                     // ?a == ?b <=> !(?a) == !(?b) -> [(a == b) && (a != null && b != null)] || (a == null && b == null))
                     // !(?a) == ?b <=> ?a == !(?b) -> [(a != b) && (a != null && b != null)] || (a == null && b == null)
                     return leftNegated == rightNegated
-                        ? ExpandNullableEqualNullable(left, right, leftIsNull, rightIsNull)
-                        : ExpandNegatedNullableEqualNullable(left, right, leftIsNull, rightIsNull);
+                        ? ExpandNullableEqualNullable(left, right, leftIsNull, leftIsNotNull, rightIsNull, rightIsNotNull)
+                        : ExpandNegatedNullableEqualNullable(left, right, leftIsNull, leftIsNotNull, rightIsNull, rightIsNotNull);
                 }
 
                 if (leftNullable && !rightNullable)
@@ -916,8 +921,8 @@ namespace Microsoft.EntityFrameworkCore.Query
                     // ?a == b <=> !(?a) == !b -> (a == b) && (a != null)
                     // !(?a) == b <=> ?a == !b -> (a != b) && (a != null)
                     return leftNegated == rightNegated
-                        ? ExpandNullableEqualNonNullable(left, right, leftIsNull)
-                        : ExpandNegatedNullableEqualNonNullable(left, right, leftIsNull);
+                        ? ExpandNullableEqualNonNullable(left, right, leftIsNotNull)
+                        : ExpandNegatedNullableEqualNonNullable(left, right, leftIsNotNull);
                 }
 
                 if (rightNullable && !leftNullable)
@@ -925,8 +930,8 @@ namespace Microsoft.EntityFrameworkCore.Query
                     // a == ?b <=> !a == !(?b) -> (a == b) && (b != null)
                     // !a == ?b <=> a == !(?b) -> (a != b) && (b != null)
                     return leftNegated == rightNegated
-                        ? ExpandNullableEqualNonNullable(left, right, rightIsNull)
-                        : ExpandNegatedNullableEqualNonNullable(left, right, rightIsNull);
+                        ? ExpandNullableEqualNonNullable(left, right, rightIsNotNull)
+                        : ExpandNegatedNullableEqualNonNullable(left, right, rightIsNotNull);
                 }
             }
 
@@ -937,8 +942,8 @@ namespace Microsoft.EntityFrameworkCore.Query
                     // ?a != ?b <=> !(?a) != !(?b) -> [(a != b) || (a == null || b == null)] && (a != null || b != null)
                     // !(?a) != ?b <=> ?a != !(?b) -> [(a == b) || (a == null || b == null)] && (a != null || b != null)
                     return leftNegated == rightNegated
-                        ? ExpandNullableNotEqualNullable(left, right, leftIsNull, rightIsNull)
-                        : ExpandNegatedNullableNotEqualNullable(left, right, leftIsNull, rightIsNull);
+                        ? ExpandNullableNotEqualNullable(left, right, leftIsNull, leftIsNotNull, rightIsNull, rightIsNotNull)
+                        : ExpandNegatedNullableNotEqualNullable(left, right, leftIsNull, leftIsNotNull, rightIsNull, rightIsNotNull);
                 }
 
                 if (leftNullable)
@@ -1365,20 +1370,22 @@ namespace Microsoft.EntityFrameworkCore.Query
                         operandNullable: null);
 
                     return sqlBinaryOperand.OperatorType == ExpressionType.Coalesce
-                        ? SqlExpressionFactory.MakeBinary(
-                            sqlUnaryExpression.OperatorType == ExpressionType.Equal
-                                ? ExpressionType.AndAlso
-                                : ExpressionType.OrElse,
-                            left,
-                            right,
-                            sqlUnaryExpression.TypeMapping)
-                        : SqlExpressionFactory.MakeBinary(
-                            sqlUnaryExpression.OperatorType == ExpressionType.Equal
-                                ? ExpressionType.OrElse
-                                : ExpressionType.AndAlso,
-                            left,
-                            right,
-                            sqlUnaryExpression.TypeMapping);
+                        ? SimplifyLogicalSqlBinaryExpression(
+                            SqlExpressionFactory.MakeBinary(
+                                sqlUnaryExpression.OperatorType == ExpressionType.Equal
+                                    ? ExpressionType.AndAlso
+                                    : ExpressionType.OrElse,
+                                left,
+                                right,
+                                sqlUnaryExpression.TypeMapping))
+                        : SimplifyLogicalSqlBinaryExpression(
+                            SqlExpressionFactory.MakeBinary(
+                                sqlUnaryExpression.OperatorType == ExpressionType.Equal
+                                    ? ExpressionType.OrElse
+                                    : ExpressionType.AndAlso,
+                                left,
+                                right,
+                                sqlUnaryExpression.TypeMapping));
                 }
             }
 
@@ -1467,17 +1474,26 @@ namespace Microsoft.EntityFrameworkCore.Query
         // N | 0 | 0                             | 0 OR 0 = 0       |
         // N | 1 | 0                             | 0 OR 0 = 0       |
         // N | N | 1                             | 0 OR 1 = 1       |
-        private SqlBinaryExpression ExpandNullableEqualNullable(
-            SqlExpression left, SqlExpression right, SqlExpression leftIsNull, SqlExpression rightIsNull)
-            => SqlExpressionFactory.OrElse(
-                SqlExpressionFactory.AndAlso(
-                    SqlExpressionFactory.Equal(left, right),
-                    SqlExpressionFactory.AndAlso(
-                        SqlExpressionFactory.Not(leftIsNull),
-                        SqlExpressionFactory.Not(rightIsNull))),
-                SqlExpressionFactory.AndAlso(
-                    leftIsNull,
-                    rightIsNull));
+        private SqlExpression ExpandNullableEqualNullable(
+            SqlExpression left,
+            SqlExpression right,
+            SqlExpression leftIsNull,
+            SqlExpression leftIsNotNull,
+            SqlExpression rightIsNull,
+            SqlExpression rightIsNotNull)
+            => SimplifyLogicalSqlBinaryExpression(
+                SqlExpressionFactory.OrElse(
+                    SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.AndAlso(
+                            SqlExpressionFactory.Equal(left, right),
+                            SimplifyLogicalSqlBinaryExpression(
+                                SqlExpressionFactory.AndAlso(
+                                    leftIsNotNull,
+                                    rightIsNotNull)))),
+                    SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.AndAlso(
+                            leftIsNull,
+                            rightIsNull))));
 
         // !(?a) == ?b -> [(a != b) && (a != null && b != null)] || (a == null && b == null)
         //
@@ -1504,17 +1520,26 @@ namespace Microsoft.EntityFrameworkCore.Query
         // N | 0 | 0                             | 0 OR 0 = 0       |
         // N | 1 | 0                             | 0 OR 0 = 0       |
         // N | N | 1                             | 0 OR 1 = 1       |
-        private SqlBinaryExpression ExpandNegatedNullableEqualNullable(
-            SqlExpression left, SqlExpression right, SqlExpression leftIsNull, SqlExpression rightIsNull)
-            => SqlExpressionFactory.OrElse(
-                SqlExpressionFactory.AndAlso(
-                    SqlExpressionFactory.NotEqual(left, right),
-                    SqlExpressionFactory.AndAlso(
-                        SqlExpressionFactory.Not(leftIsNull),
-                        SqlExpressionFactory.Not(rightIsNull))),
-                SqlExpressionFactory.AndAlso(
-                    leftIsNull,
-                    rightIsNull));
+        private SqlExpression ExpandNegatedNullableEqualNullable(
+            SqlExpression left,
+            SqlExpression right,
+            SqlExpression leftIsNull,
+            SqlExpression leftIsNotNull,
+            SqlExpression rightIsNull,
+            SqlExpression rightIsNotNull)
+            => SimplifyLogicalSqlBinaryExpression(
+                SqlExpressionFactory.OrElse(
+                    SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.AndAlso(
+                            SqlExpressionFactory.NotEqual(left, right),
+                        SimplifyLogicalSqlBinaryExpression(
+                            SqlExpressionFactory.AndAlso(
+                                leftIsNotNull,
+                                rightIsNotNull)))),
+                    SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.AndAlso(
+                            leftIsNull,
+                            rightIsNull))));
 
         // ?a == b -> (a == b) && (a != null)
         //
@@ -1526,11 +1551,12 @@ namespace Microsoft.EntityFrameworkCore.Query
         // 1 | 1 | 1           | 1                | 1                |
         // N | 0 | N           | 0                | 0                |
         // N | 1 | N           | 0                | 0                |
-        private SqlBinaryExpression ExpandNullableEqualNonNullable(
-            SqlExpression left, SqlExpression right, SqlExpression leftIsNull)
-            => SqlExpressionFactory.AndAlso(
-                SqlExpressionFactory.Equal(left, right),
-                SqlExpressionFactory.Not(leftIsNull));
+        private SqlExpression ExpandNullableEqualNonNullable(
+            SqlExpression left, SqlExpression right, SqlExpression leftIsNotNull)
+            => SimplifyLogicalSqlBinaryExpression(
+                SqlExpressionFactory.AndAlso(
+                    SqlExpressionFactory.Equal(left, right),
+                    leftIsNotNull));
 
         // !(?a) == b -> (a != b) && (a != null)
         //
@@ -1542,11 +1568,12 @@ namespace Microsoft.EntityFrameworkCore.Query
         // 1 | 1 | 0           | 1                | 0                |
         // N | 0 | N           | 0                | 0                |
         // N | 1 | N           | 0                | 0                |
-        private SqlBinaryExpression ExpandNegatedNullableEqualNonNullable(
-            SqlExpression left, SqlExpression right, SqlExpression leftIsNull)
-            => SqlExpressionFactory.AndAlso(
-                SqlExpressionFactory.NotEqual(left, right),
-                SqlExpressionFactory.Not(leftIsNull));
+        private SqlExpression ExpandNegatedNullableEqualNonNullable(
+            SqlExpression left, SqlExpression right, SqlExpression leftIsNotNull)
+            => SimplifyLogicalSqlBinaryExpression(
+                SqlExpressionFactory.AndAlso(
+                    SqlExpressionFactory.NotEqual(left, right),
+                    leftIsNotNull));
 
         // ?a != ?b -> [(a != b) || (a == null || b == null)] && (a != null || b != null)
         //
@@ -1573,17 +1600,43 @@ namespace Microsoft.EntityFrameworkCore.Query
         // N | 0 | 1                             | 1 && 1 = 1       |
         // N | 1 | 1                             | 1 && 1 = 1       |
         // N | N | 0                             | 1 && 0 = 0       |
-        private SqlBinaryExpression ExpandNullableNotEqualNullable(
-            SqlExpression left, SqlExpression right, SqlExpression leftIsNull, SqlExpression rightIsNull)
-            => SqlExpressionFactory.AndAlso(
-                SqlExpressionFactory.OrElse(
-                    SqlExpressionFactory.NotEqual(left, right),
-                    SqlExpressionFactory.OrElse(
-                        leftIsNull,
-                        rightIsNull)),
-                SqlExpressionFactory.OrElse(
-                    SqlExpressionFactory.Not(leftIsNull),
-                    SqlExpressionFactory.Not(rightIsNull)));
+        //private SqlBinaryExpression ExpandNullableNotEqualNullable(
+        //    SqlExpression left,
+        //    SqlExpression right,
+        //    SqlExpression leftIsNull,
+        //    SqlExpression leftIsNotNull,
+        //    SqlExpression rightIsNull,
+        //    SqlExpression rightIsNotNull)
+        //    => SqlExpressionFactory.AndAlso(
+        //        SqlExpressionFactory.OrElse(
+        //            SqlExpressionFactory.NotEqual(left, right),
+        //            SqlExpressionFactory.OrElse(
+        //                leftIsNull,
+        //                rightIsNull)),
+        //        SqlExpressionFactory.OrElse(
+        //            leftIsNotNull,
+        //            rightIsNotNull));
+
+        private SqlExpression ExpandNullableNotEqualNullable(
+            SqlExpression left,
+            SqlExpression right,
+            SqlExpression leftIsNull,
+            SqlExpression leftIsNotNull,
+            SqlExpression rightIsNull,
+            SqlExpression rightIsNotNull)
+            => SimplifyLogicalSqlBinaryExpression(
+                SqlExpressionFactory.AndAlso(
+                    SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.OrElse(
+                            SqlExpressionFactory.NotEqual(left, right),
+                            SimplifyLogicalSqlBinaryExpression(
+                                SqlExpressionFactory.OrElse(
+                                    leftIsNull,
+                                    rightIsNull)))),
+                    SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.OrElse(
+                            leftIsNotNull,
+                            rightIsNotNull))));
 
         // !(?a) != ?b -> [(a == b) || (a == null || b == null)] && (a != null || b != null)
         //
@@ -1610,17 +1663,26 @@ namespace Microsoft.EntityFrameworkCore.Query
         // N | 0 | 1                             | 1 && 1 = 1       |
         // N | 1 | 1                             | 1 && 1 = 1       |
         // N | N | 0                             | 1 && 0 = 0       |
-        private SqlBinaryExpression ExpandNegatedNullableNotEqualNullable(
-            SqlExpression left, SqlExpression right, SqlExpression leftIsNull, SqlExpression rightIsNull)
-            => SqlExpressionFactory.AndAlso(
-                SqlExpressionFactory.OrElse(
-                    SqlExpressionFactory.Equal(left, right),
-                    SqlExpressionFactory.OrElse(
-                        leftIsNull,
-                        rightIsNull)),
-                SqlExpressionFactory.OrElse(
-                    SqlExpressionFactory.Not(leftIsNull),
-                    SqlExpressionFactory.Not(rightIsNull)));
+        private SqlExpression ExpandNegatedNullableNotEqualNullable(
+            SqlExpression left,
+            SqlExpression right,
+            SqlExpression leftIsNull,
+            SqlExpression leftIsNotNull,
+            SqlExpression rightIsNull,
+            SqlExpression rightIsNotNull)
+            => SimplifyLogicalSqlBinaryExpression(
+                SqlExpressionFactory.AndAlso(
+                    SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.OrElse(
+                            SqlExpressionFactory.Equal(left, right),
+                            SimplifyLogicalSqlBinaryExpression(
+                                SqlExpressionFactory.OrElse(
+                                    leftIsNull,
+                                    rightIsNull)))),
+                    SimplifyLogicalSqlBinaryExpression(
+                        SqlExpressionFactory.OrElse(
+                            leftIsNotNull,
+                            rightIsNotNull))));
 
         // ?a != b -> (a != b) || (a == null)
         //
@@ -1632,11 +1694,12 @@ namespace Microsoft.EntityFrameworkCore.Query
         // 1 | 1 | 0           | 0                | 0                |
         // N | 0 | N           | 1                | 1                |
         // N | 1 | N           | 1                | 1                |
-        private SqlBinaryExpression ExpandNullableNotEqualNonNullable(
+        private SqlExpression ExpandNullableNotEqualNonNullable(
             SqlExpression left, SqlExpression right, SqlExpression leftIsNull)
-            => SqlExpressionFactory.OrElse(
-                SqlExpressionFactory.NotEqual(left, right),
-                leftIsNull);
+            => SimplifyLogicalSqlBinaryExpression(
+                SqlExpressionFactory.OrElse(
+                    SqlExpressionFactory.NotEqual(left, right),
+                    leftIsNull));
 
         // !(?a) != b -> (a == b) || (a == null)
         //
@@ -1648,10 +1711,11 @@ namespace Microsoft.EntityFrameworkCore.Query
         // 1 | 1 | 1           | 0                | 1             |
         // N | 0 | N           | 1                | 1             |
         // N | 1 | N           | 1                | 1             |
-        private SqlBinaryExpression ExpandNegatedNullableNotEqualNonNullable(
+        private SqlExpression ExpandNegatedNullableNotEqualNonNullable(
             SqlExpression left, SqlExpression right, SqlExpression leftIsNull)
-            => SqlExpressionFactory.OrElse(
-                SqlExpressionFactory.Equal(left, right),
-                leftIsNull);
+            => SimplifyLogicalSqlBinaryExpression(
+                SqlExpressionFactory.OrElse(
+                    SqlExpressionFactory.Equal(left, right),
+                    leftIsNull));
     }
 }
