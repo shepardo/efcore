@@ -305,7 +305,11 @@ namespace Microsoft.EntityFrameworkCore.Query
             CanOptimize = canOptimize;
             RestoreNonNullableColumnsList(currentNonNullableColumnsCount);
 
-            return innerJoinExpression.Update(newTable, newJoinPredicate);
+            return newJoinPredicate is SqlConstantExpression constantJoinPredicate
+                && constantJoinPredicate.Value is bool boolPredicate
+                && boolPredicate
+                ? (Expression)new CrossJoinExpression(newTable)
+                : innerJoinExpression.Update(newTable, newJoinPredicate);
         }
 
         protected override Expression VisitIntersect(IntersectExpression intersectExpression)
@@ -1097,53 +1101,142 @@ namespace Microsoft.EntityFrameworkCore.Query
 
         private SqlExpression OptimizeNonNullableNotExpression(SqlUnaryExpression sqlUnaryExpression)
         {
-            var sqlUnaryOperand = sqlUnaryExpression.Operand as SqlUnaryExpression;
-            if (sqlUnaryExpression != null)
-            {
-                fgdfgd
-            }
-
-
-            var sqlBinaryOperand = sqlUnaryExpression.Operand as SqlBinaryExpression;
-            if (sqlBinaryOperand == null)
+            if (sqlUnaryExpression.OperatorType != ExpressionType.Not)
             {
                 return sqlUnaryExpression;
             }
 
-            // optimizations below are only correct in 2-value logic
-            // De Morgan's
-            if (sqlBinaryOperand.OperatorType == ExpressionType.AndAlso
-                || sqlBinaryOperand.OperatorType == ExpressionType.OrElse)
+            switch (sqlUnaryExpression.Operand)
             {
-                // since entire AndAlso/OrElse expression is non-nullable, both sides of it (left and right) must also be non-nullable
-                // so it's safe to perform recursive optimization here
-                var left = OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(sqlBinaryOperand.Left));
-                var right = OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(sqlBinaryOperand.Right));
+                // !(true) -> false
+                // !(false) -> true
+                case SqlConstantExpression constantOperand
+                    when constantOperand.Value is bool value:
+                {
+                    return SqlExpressionFactory.Constant(!value, sqlUnaryExpression.TypeMapping);
+                }
 
-                return SimplifyLogicalSqlBinaryExpression(
-                    SqlExpressionFactory.MakeBinary(
-                        sqlBinaryOperand.OperatorType == ExpressionType.AndAlso
-                            ? ExpressionType.OrElse
-                            : ExpressionType.AndAlso,
-                        left,
-                        right,
-                        sqlBinaryOperand.TypeMapping));
+                case InExpression inOperand:
+                    return inOperand.Negate();
+
+                case SqlUnaryExpression sqlUnaryOperand:
+                {
+                    switch (sqlUnaryOperand.OperatorType)
+                    {
+                        // !(!a) -> a
+                        case ExpressionType.Not:
+                            return sqlUnaryOperand.Operand;
+
+                        //!(a IS NULL) -> a IS NOT NULL
+                        case ExpressionType.Equal:
+                            return SqlExpressionFactory.IsNotNull(sqlUnaryOperand.Operand);
+
+                        //!(a IS NOT NULL) -> a IS NULL
+                        case ExpressionType.NotEqual:
+                            return SqlExpressionFactory.IsNull(sqlUnaryOperand.Operand);
+                    }
+                    break;
+                }
+
+                case SqlBinaryExpression sqlBinaryOperand:
+                {
+                    // optimizations below are only correct in 2-value logic
+                    // De Morgan's
+                    if (sqlBinaryOperand.OperatorType == ExpressionType.AndAlso
+                        || sqlBinaryOperand.OperatorType == ExpressionType.OrElse)
+                    {
+                        // since entire AndAlso/OrElse expression is non-nullable, both sides of it (left and right) must also be non-nullable
+                        // so it's safe to perform recursive optimization here
+                        var left = OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(sqlBinaryOperand.Left));
+                        var right = OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(sqlBinaryOperand.Right));
+
+                        return SimplifyLogicalSqlBinaryExpression(
+                            SqlExpressionFactory.MakeBinary(
+                                sqlBinaryOperand.OperatorType == ExpressionType.AndAlso
+                                    ? ExpressionType.OrElse
+                                    : ExpressionType.AndAlso,
+                                left,
+                                right,
+                                sqlBinaryOperand.TypeMapping));
+                    }
+
+                    // !(a == b) -> a != b
+                    // !(a != b) -> a == b
+                    // !(a > b) -> a <= b
+                    // !(a >= b) -> a < b
+                    // !(a < b) -> a >= b
+                    // !(a <= b) -> a > b
+                    if (TryNegate(sqlBinaryOperand.OperatorType, out var negated))
+                    {
+                        return SqlExpressionFactory.MakeBinary(
+                            negated,
+                            sqlBinaryOperand.Left,
+                            sqlBinaryOperand.Right,
+                            sqlBinaryOperand.TypeMapping);
+                    }
+                }
+                break;
             }
 
-            // !(a == b) -> a != b
-            // !(a != b) -> a == b
-            // !(a > b) -> a <= b
-            // !(a >= b) -> a < b
-            // !(a < b) -> a >= b
-            // !(a <= b) -> a > b
-            if (TryNegate(sqlBinaryOperand.OperatorType, out var negated))
-            {
-                return SqlExpressionFactory.MakeBinary(
-                    negated,
-                    sqlBinaryOperand.Left,
-                    sqlBinaryOperand.Right,
-                    sqlBinaryOperand.TypeMapping);
-            }
+            //var sqlUnaryOperand = sqlUnaryExpression.Operand as SqlUnaryExpression;
+            //if (sqlUnaryExpression != null)
+            //{
+            //    switch (sqlUnaryOperand.OperatorType)
+            //    {
+            //        // !(!a) -> a
+            //        case ExpressionType.Not:
+            //            return sqlUnaryOperand.Operand;
+
+            //        //!(a IS NULL) -> a IS NOT NULL
+            //        case ExpressionType.Equal:
+            //            return SqlExpressionFactory.IsNotNull(sqlUnaryOperand.Operand);
+
+            //        //!(a IS NOT NULL) -> a IS NULL
+            //        case ExpressionType.NotEqual:
+            //            return SqlExpressionFactory.IsNull(sqlUnaryOperand.Operand);
+            //    }
+            //}
+
+            //var sqlBinaryOperand = sqlUnaryExpression.Operand as SqlBinaryExpression;
+            //if (sqlBinaryOperand == null)
+            //{
+            //    return sqlUnaryExpression;
+            //}
+
+            //// optimizations below are only correct in 2-value logic
+            //// De Morgan's
+            //if (sqlBinaryOperand.OperatorType == ExpressionType.AndAlso
+            //    || sqlBinaryOperand.OperatorType == ExpressionType.OrElse)
+            //{
+            //    // since entire AndAlso/OrElse expression is non-nullable, both sides of it (left and right) must also be non-nullable
+            //    // so it's safe to perform recursive optimization here
+            //    var left = OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(sqlBinaryOperand.Left));
+            //    var right = OptimizeNonNullableNotExpression(SqlExpressionFactory.Not(sqlBinaryOperand.Right));
+
+            //    return SimplifyLogicalSqlBinaryExpression(
+            //        SqlExpressionFactory.MakeBinary(
+            //            sqlBinaryOperand.OperatorType == ExpressionType.AndAlso
+            //                ? ExpressionType.OrElse
+            //                : ExpressionType.AndAlso,
+            //            left,
+            //            right,
+            //            sqlBinaryOperand.TypeMapping));
+            //}
+
+            //// !(a == b) -> a != b
+            //// !(a != b) -> a == b
+            //// !(a > b) -> a <= b
+            //// !(a >= b) -> a < b
+            //// !(a < b) -> a >= b
+            //// !(a <= b) -> a > b
+            //if (TryNegate(sqlBinaryOperand.OperatorType, out var negated))
+            //{
+            //    return SqlExpressionFactory.MakeBinary(
+            //        negated,
+            //        sqlBinaryOperand.Left,
+            //        sqlBinaryOperand.Right,
+            //        sqlBinaryOperand.TypeMapping);
+            //}
 
             return sqlUnaryExpression;
 

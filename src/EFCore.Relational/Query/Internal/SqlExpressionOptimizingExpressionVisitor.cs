@@ -35,194 +35,194 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
 
             return extensionExpression switch
             {
-                SqlUnaryExpression sqlUnaryExpression => VisitSqlUnaryExpression(sqlUnaryExpression),
-                SqlBinaryExpression sqlBinaryExpression => VisitSqlBinaryExpression(sqlBinaryExpression),
-                SelectExpression selectExpression => VisitSelectExpression(selectExpression),
-                InnerJoinExpression innerJoinExpression => VisitInnerJoinExpression(innerJoinExpression),
+                //SqlUnaryExpression sqlUnaryExpression => VisitSqlUnaryExpression(sqlUnaryExpression),
+                //SqlBinaryExpression sqlBinaryExpression => VisitSqlBinaryExpression(sqlBinaryExpression),
+                //SelectExpression selectExpression => VisitSelectExpression(selectExpression),
+                //InnerJoinExpression innerJoinExpression => VisitInnerJoinExpression(innerJoinExpression),
                 _ => base.VisitExtension(extensionExpression),
             };
 
-            Expression VisitInnerJoinExpression(InnerJoinExpression innerJoinExpression)
-            {
-                var result = base.VisitExtension(innerJoinExpression);
+            //Expression VisitInnerJoinExpression(InnerJoinExpression innerJoinExpression)
+            //{
+            //    var result = base.VisitExtension(innerJoinExpression);
 
-                return (result is InnerJoinExpression innerJoinExpressionResult
-                    && innerJoinExpressionResult.JoinPredicate is SqlConstantExpression constantJoinPredicate
-                    && constantJoinPredicate.Value is bool boolPredicate
-                    && boolPredicate)
-                    ? new CrossJoinExpression(innerJoinExpressionResult.Table)
-                    : result;
-            }
+            //    return (result is InnerJoinExpression innerJoinExpressionResult
+            //        && innerJoinExpressionResult.JoinPredicate is SqlConstantExpression constantJoinPredicate
+            //        && constantJoinPredicate.Value is bool boolPredicate
+            //        && boolPredicate)
+            //        ? new CrossJoinExpression(innerJoinExpressionResult.Table)
+            //        : result;
+            //}
         }
 
-        protected virtual Expression VisitSelectExpression([NotNull] SelectExpression selectExpression)
-        {
-            Check.NotNull(selectExpression, nameof(selectExpression));
+        //protected virtual Expression VisitSelectExpression([NotNull] SelectExpression selectExpression)
+        //{
+        //    Check.NotNull(selectExpression, nameof(selectExpression));
 
-            var newExpression = base.VisitExtension(selectExpression);
+        //    var newExpression = base.VisitExtension(selectExpression);
 
-            // if predicate is optimized to true, we can simply remove it
-            if (newExpression is SelectExpression newSelectExpression)
-            {
-                var changed = false;
-                var newPredicate = newSelectExpression.Predicate;
-                var newHaving = newSelectExpression.Having;
-                if (newSelectExpression.Predicate is SqlConstantExpression predicateConstantExpression
-                    && predicateConstantExpression.Value is bool predicateBoolValue
-                    && predicateBoolValue)
-                {
-                    newPredicate = null;
-                    changed = true;
-                }
+        //    // if predicate is optimized to true, we can simply remove it
+        //    if (newExpression is SelectExpression newSelectExpression)
+        //    {
+        //        var changed = false;
+        //        var newPredicate = newSelectExpression.Predicate;
+        //        var newHaving = newSelectExpression.Having;
+        //        if (newSelectExpression.Predicate is SqlConstantExpression predicateConstantExpression
+        //            && predicateConstantExpression.Value is bool predicateBoolValue
+        //            && predicateBoolValue)
+        //        {
+        //            newPredicate = null;
+        //            changed = true;
+        //        }
 
-                if (newSelectExpression.Having is SqlConstantExpression havingConstantExpression
-                    && havingConstantExpression.Value is bool havingBoolValue
-                    && havingBoolValue)
-                {
-                    newHaving = null;
-                    changed = true;
-                }
+        //        if (newSelectExpression.Having is SqlConstantExpression havingConstantExpression
+        //            && havingConstantExpression.Value is bool havingBoolValue
+        //            && havingBoolValue)
+        //        {
+        //            newHaving = null;
+        //            changed = true;
+        //        }
 
-                return changed
-                    ? newSelectExpression.Update(
-                        newSelectExpression.Projection.ToList(),
-                        newSelectExpression.Tables.ToList(),
-                        newPredicate,
-                        newSelectExpression.GroupBy.ToList(),
-                        newHaving,
-                        newSelectExpression.Orderings.ToList(),
-                        newSelectExpression.Limit,
-                        newSelectExpression.Offset,
-                        newSelectExpression.IsDistinct,
-                        newSelectExpression.Alias)
-                    : newSelectExpression;
-            }
+        //        return changed
+        //            ? newSelectExpression.Update(
+        //                newSelectExpression.Projection.ToList(),
+        //                newSelectExpression.Tables.ToList(),
+        //                newPredicate,
+        //                newSelectExpression.GroupBy.ToList(),
+        //                newHaving,
+        //                newSelectExpression.Orderings.ToList(),
+        //                newSelectExpression.Limit,
+        //                newSelectExpression.Offset,
+        //                newSelectExpression.IsDistinct,
+        //                newSelectExpression.Alias)
+        //            : newSelectExpression;
+        //    }
 
-            return newExpression;
-        }
+        //    return newExpression;
+        //}
 
-        protected virtual Expression VisitSqlUnaryExpression([NotNull] SqlUnaryExpression sqlUnaryExpression)
-        {
-            var newOperand = (SqlExpression)Visit(sqlUnaryExpression.Operand);
+        //protected virtual Expression VisitSqlUnaryExpression([NotNull] SqlUnaryExpression sqlUnaryExpression)
+        //{
+        //    var newOperand = (SqlExpression)Visit(sqlUnaryExpression.Operand);
 
-            return SimplifyUnaryExpression(
-                sqlUnaryExpression.OperatorType,
-                newOperand,
-                sqlUnaryExpression.Type,
-                sqlUnaryExpression.TypeMapping);
-        }
+        //    return SimplifyUnaryExpression(
+        //        sqlUnaryExpression.OperatorType,
+        //        newOperand,
+        //        sqlUnaryExpression.Type,
+        //        sqlUnaryExpression.TypeMapping);
+        //}
 
-        private SqlExpression SimplifyUnaryExpression(
-            ExpressionType operatorType,
-            SqlExpression operand,
-            Type type,
-            RelationalTypeMapping typeMapping)
-        {
-            switch (operatorType)
-            {
-                case ExpressionType.Not
-                    when type == typeof(bool)
-                    || type == typeof(bool?):
-                {
-                    switch (operand)
-                    {
-                        // !(true) -> false
-                        // !(false) -> true
-                        case SqlConstantExpression constantOperand
-                            when constantOperand.Value is bool value:
-                        {
-                            return SqlExpressionFactory.Constant(!value, typeMapping);
-                        }
+        //private SqlExpression SimplifyUnaryExpression(
+        //    ExpressionType operatorType,
+        //    SqlExpression operand,
+        //    Type type,
+        //    RelationalTypeMapping typeMapping)
+        //{
+        //    switch (operatorType)
+        //    {
+        //        case ExpressionType.Not
+        //            when type == typeof(bool)
+        //            || type == typeof(bool?):
+        //        {
+        //            switch (operand)
+        //            {
+        //                // !(true) -> false
+        //                // !(false) -> true
+        //                case SqlConstantExpression constantOperand
+        //                    when constantOperand.Value is bool value:
+        //                {
+        //                    return SqlExpressionFactory.Constant(!value, typeMapping);
+        //                }
 
-                        case InExpression inOperand:
-                            return inOperand.Negate();
+        //                case InExpression inOperand:
+        //                    return inOperand.Negate();
 
-                        case SqlUnaryExpression unaryOperand:
-                            switch (unaryOperand.OperatorType)
-                            {
-                                // !(!a) -> a
-                                case ExpressionType.Not:
-                                    return unaryOperand.Operand;
+        //                //case SqlUnaryExpression unaryOperand:
+        //                //    switch (unaryOperand.OperatorType)
+        //                //    {
+        //                //        // !(!a) -> a
+        //                //        case ExpressionType.Not:
+        //                //            return unaryOperand.Operand;
 
-                                //!(a IS NULL) -> a IS NOT NULL
-                                case ExpressionType.Equal:
-                                    return SqlExpressionFactory.IsNotNull(unaryOperand.Operand);
+        //                //        //!(a IS NULL) -> a IS NOT NULL
+        //                //        case ExpressionType.Equal:
+        //                //            return SqlExpressionFactory.IsNotNull(unaryOperand.Operand);
 
-                                //!(a IS NOT NULL) -> a IS NULL
-                                case ExpressionType.NotEqual:
-                                    return SqlExpressionFactory.IsNull(unaryOperand.Operand);
-                            }
+        //                //        //!(a IS NOT NULL) -> a IS NULL
+        //                //        case ExpressionType.NotEqual:
+        //                //            return SqlExpressionFactory.IsNull(unaryOperand.Operand);
+        //                //    }
 
-                            break;
+        //                //    break;
 
-                        //case SqlBinaryExpression binaryOperand:
-                        //{
-                        //    // !(a == b) -> (a != b)
-                        //    // !(a != b) -> (a == b)
-                        //    if (binaryOperand.OperatorType == ExpressionType.Equal
-                        //        || binaryOperand.OperatorType == ExpressionType.NotEqual)
-                        //    {
-                        //        return SimplifyBinaryExpression(
-                        //            binaryOperand.OperatorType == ExpressionType.Equal
-                        //                ? ExpressionType.NotEqual
-                        //                : ExpressionType.Equal,
-                        //            binaryOperand.Left,
-                        //            binaryOperand.Right,
-                        //            binaryOperand.TypeMapping);
-                        //    }
+        //                //case SqlBinaryExpression binaryOperand:
+        //                //{
+        //                //    // !(a == b) -> (a != b)
+        //                //    // !(a != b) -> (a == b)
+        //                //    if (binaryOperand.OperatorType == ExpressionType.Equal
+        //                //        || binaryOperand.OperatorType == ExpressionType.NotEqual)
+        //                //    {
+        //                //        return SimplifyBinaryExpression(
+        //                //            binaryOperand.OperatorType == ExpressionType.Equal
+        //                //                ? ExpressionType.NotEqual
+        //                //                : ExpressionType.Equal,
+        //                //            binaryOperand.Left,
+        //                //            binaryOperand.Right,
+        //                //            binaryOperand.TypeMapping);
+        //                //    }
 
-                        //    //// De Morgan's
-                        //    //// only valid in 2-value logic
-                        //    //// NullSemantics removes all nulls from expressions wrapped around Not
-                        //    //// so the optimizations are safe to do as long as UseRelationalNulls = false
-                        //    //if (!_useRelationalNulls
-                        //    //    && (binaryOperand.OperatorType == ExpressionType.AndAlso
-                        //    //        || binaryOperand.OperatorType == ExpressionType.OrElse))
-                        //    //{
-                        //    //    var newLeft = SimplifyUnaryExpression(ExpressionType.Not, binaryOperand.Left, type, typeMapping);
-                        //    //    var newRight = SimplifyUnaryExpression(ExpressionType.Not, binaryOperand.Right, type, typeMapping);
+        //                //    //// De Morgan's
+        //                //    //// only valid in 2-value logic
+        //                //    //// NullSemantics removes all nulls from expressions wrapped around Not
+        //                //    //// so the optimizations are safe to do as long as UseRelationalNulls = false
+        //                //    //if (!_useRelationalNulls
+        //                //    //    && (binaryOperand.OperatorType == ExpressionType.AndAlso
+        //                //    //        || binaryOperand.OperatorType == ExpressionType.OrElse))
+        //                //    //{
+        //                //    //    var newLeft = SimplifyUnaryExpression(ExpressionType.Not, binaryOperand.Left, type, typeMapping);
+        //                //    //    var newRight = SimplifyUnaryExpression(ExpressionType.Not, binaryOperand.Right, type, typeMapping);
 
-                        //    //    return SimplifyLogicalSqlBinaryExpression(
-                        //    //        binaryOperand.OperatorType == ExpressionType.AndAlso
-                        //    //            ? ExpressionType.OrElse
-                        //    //            : ExpressionType.AndAlso,
-                        //    //        newLeft,
-                        //    //        newRight,
-                        //    //        binaryOperand.TypeMapping);
-                        //    //}
-                        //}
-                        //break;
-                    }
-                    break;
-                }
+        //                //    //    return SimplifyLogicalSqlBinaryExpression(
+        //                //    //        binaryOperand.OperatorType == ExpressionType.AndAlso
+        //                //    //            ? ExpressionType.OrElse
+        //                //    //            : ExpressionType.AndAlso,
+        //                //    //        newLeft,
+        //                //    //        newRight,
+        //                //    //        binaryOperand.TypeMapping);
+        //                //    //}
+        //                //}
+        //                //break;
+        //            }
+        //            break;
+        //        }
 
-                //case ExpressionType.Equal:
-                //case ExpressionType.NotEqual:
-                //{
-                //    switch (operand)
-                //    {
+        //        //case ExpressionType.Equal:
+        //        //case ExpressionType.NotEqual:
+        //        //{
+        //        //    switch (operand)
+        //        //    {
 
-                //        case SqlUnaryExpression sqlUnaryOperand:
-                //            switch (sqlUnaryOperand.OperatorType)
-                //            {
-                //                case ExpressionType.Equal:
-                //                case ExpressionType.NotEqual:
-                //                    // (a is null) is null -> false
-                //                    // (a is not null) is null -> false
-                //                    // (a is null) is not null -> true
-                //                    // (a is not null) is not null -> true
-                //                    return SqlExpressionFactory.Constant(
-                //                        sqlUnaryOperand.OperatorType == ExpressionType.NotEqual,
-                //                        sqlUnaryOperand.TypeMapping);
-                //            }
-                //            break;
-                //    }
-                //    break;
-                //}
-            }
+        //        //        case SqlUnaryExpression sqlUnaryOperand:
+        //        //            switch (sqlUnaryOperand.OperatorType)
+        //        //            {
+        //        //                case ExpressionType.Equal:
+        //        //                case ExpressionType.NotEqual:
+        //        //                    // (a is null) is null -> false
+        //        //                    // (a is not null) is null -> false
+        //        //                    // (a is null) is not null -> true
+        //        //                    // (a is not null) is not null -> true
+        //        //                    return SqlExpressionFactory.Constant(
+        //        //                        sqlUnaryOperand.OperatorType == ExpressionType.NotEqual,
+        //        //                        sqlUnaryOperand.TypeMapping);
+        //        //            }
+        //        //            break;
+        //        //    }
+        //        //    break;
+        //        //}
+        //    }
 
-            return SqlExpressionFactory.MakeUnary(operatorType, operand, type, typeMapping);
-        }
+        //    return SqlExpressionFactory.MakeUnary(operatorType, operand, type, typeMapping);
+        //}
 
         //protected virtual Expression VisitSqlBinaryExpression([NotNull] SqlBinaryExpression sqlBinaryExpression)
         //{

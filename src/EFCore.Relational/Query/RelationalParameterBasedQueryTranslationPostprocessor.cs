@@ -40,8 +40,10 @@ namespace Microsoft.EntityFrameworkCore.Query
 
             canCache &= nullabilityCanCache;
 
-            var nullParametersOptimized = new SqlExpressionOptimizingExpressionVisitor(
-                Dependencies.SqlExpressionFactory, UseRelationalNulls, parametersValues).Visit(nullabilityHandled);
+            var nullParametersOptimized = nullabilityHandled;
+
+            //var nullParametersOptimized = new SqlExpressionOptimizingExpressionVisitor(
+            //    Dependencies.SqlExpressionFactory, UseRelationalNulls, parametersValues).Visit(nullabilityHandled);
 
             var fromSqlParameterOptimized = new FromSqlParameterApplyingExpressionVisitor(
                 Dependencies.SqlExpressionFactory,
