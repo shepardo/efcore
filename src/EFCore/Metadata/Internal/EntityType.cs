@@ -2541,36 +2541,50 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Internal
                 {
                     if (!properties.TryGetValue(memberInfo.GetSimpleMemberName(), out var propertyBase))
                     {
+                        if (memberInfo is PropertyInfo propertyInfo
+                            && propertyInfo.IsIndexerProperty())
+                        {
+                            foreach (var indexerPropertyBase in this.GetPropertiesAndNavigations().Where(pb => pb.IsIndexerProperty()))
+                            {
+                                ProcessPropertyBase(indexerPropertyBase, indexer: true);
+                            }
+                        }
+
                         continue;
                     }
 
-                    ValueConverter valueConverter = null;
-                    if (providerValues
-                        && !valueConverters.TryGetValue(memberInfo.Name, out valueConverter))
+                    ProcessPropertyBase(propertyBase);
+
+                    void ProcessPropertyBase(IPropertyBase propertyBase, bool indexer = false)
                     {
-                        if (propertyBase is IProperty property)
+                        ValueConverter valueConverter = null;
+                        if (providerValues
+                            && !valueConverters.TryGetValue(propertyBase.Name, out valueConverter))
                         {
-                            valueConverter = property.FindTypeMapping()?.Converter
-                                ?? property.GetValueConverter();
+                            if (propertyBase is IProperty property)
+                            {
+                                valueConverter = property.FindTypeMapping()?.Converter
+                                    ?? property.GetValueConverter();
+                            }
+
+                            valueConverters[propertyBase.Name] = valueConverter;
                         }
 
-                        valueConverters[memberInfo.Name] = valueConverter;
-                    }
+                        object value = null;
+                        switch (memberInfo)
+                        {
+                            case PropertyInfo propertyInfo:
+                                value = propertyInfo.GetValue(rawSeed, indexer ? new[] { propertyBase.Name } : null);
+                                break;
+                            case FieldInfo fieldInfo:
+                                value = fieldInfo.GetValue(rawSeed);
+                                break;
+                        }
 
-                    object value = null;
-                    switch (memberInfo)
-                    {
-                        case PropertyInfo propertyInfo:
-                            value = propertyInfo.GetValue(rawSeed);
-                            break;
-                        case FieldInfo fieldInfo:
-                            value = fieldInfo.GetValue(rawSeed);
-                            break;
+                        seed[propertyBase.Name] = valueConverter == null
+                            ? value
+                            : valueConverter.ConvertToProvider(value);
                     }
-
-                    seed[memberInfo.Name] = valueConverter == null
-                        ? value
-                        : valueConverter.ConvertToProvider(value);
                 }
             }
 

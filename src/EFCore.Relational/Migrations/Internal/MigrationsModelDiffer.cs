@@ -683,7 +683,8 @@ namespace Microsoft.EntityFrameworkCore.Migrations.Internal
             foreach (var property in entityType.GetDeclaredProperties())
             {
                 var clrProperty = property.PropertyInfo;
-                if (clrProperty == null)
+                if (clrProperty == null
+                    || clrProperty.IsIndexerProperty())
                 {
                     if (property.IsPrimaryKey())
                     {
