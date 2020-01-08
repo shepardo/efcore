@@ -120,6 +120,7 @@ namespace Microsoft.EntityFrameworkCore.Infrastructure
                 { typeof(IQueryCompiler), new ServiceCharacteristics(ServiceLifetime.Scoped) },
                 { typeof(ICompiledQueryCacheKeyGenerator), new ServiceCharacteristics(ServiceLifetime.Scoped) },
                 { typeof(IModel), new ServiceCharacteristics(ServiceLifetime.Scoped) },
+                { typeof(IEntityTypeFinder), new ServiceCharacteristics(ServiceLifetime.Scoped) },
                 { typeof(IUpdateAdapterFactory), new ServiceCharacteristics(ServiceLifetime.Scoped) },
                 { typeof(ICurrentDbContext), new ServiceCharacteristics(ServiceLifetime.Scoped) },
                 { typeof(IDbContextDependencies), new ServiceCharacteristics(ServiceLifetime.Scoped) },
@@ -132,12 +133,8 @@ namespace Microsoft.EntityFrameworkCore.Infrastructure
                 { typeof(IQueryCompilationContextFactory), new ServiceCharacteristics(ServiceLifetime.Scoped) },
                 { typeof(IDbContextLogger), new ServiceCharacteristics(ServiceLifetime.Scoped) },
                 { typeof(ILazyLoader), new ServiceCharacteristics(ServiceLifetime.Transient) },
-                {
-                    typeof(IParameterBindingFactory), new ServiceCharacteristics(ServiceLifetime.Singleton, multipleRegistrations: true)
-                },
-                {
-                    typeof(ITypeMappingSourcePlugin), new ServiceCharacteristics(ServiceLifetime.Singleton, multipleRegistrations: true)
-                },
+                { typeof(IParameterBindingFactory), new ServiceCharacteristics(ServiceLifetime.Singleton, multipleRegistrations: true) },
+                { typeof(ITypeMappingSourcePlugin), new ServiceCharacteristics(ServiceLifetime.Singleton, multipleRegistrations: true) },
                 { typeof(ISingletonOptions), new ServiceCharacteristics(ServiceLifetime.Singleton, multipleRegistrations: true) },
                 { typeof(IConventionSetPlugin), new ServiceCharacteristics(ServiceLifetime.Scoped, multipleRegistrations: true) },
                 { typeof(IResettableService), new ServiceCharacteristics(ServiceLifetime.Scoped, multipleRegistrations: true) }
@@ -234,6 +231,7 @@ namespace Microsoft.EntityFrameworkCore.Infrastructure
             TryAdd<IValueGeneratorSelector, ValueGeneratorSelector>();
             TryAdd<IModelValidator, ModelValidator>();
             TryAdd<IExecutionStrategyFactory, ExecutionStrategyFactory>();
+            TryAdd<IEntityTypeFinder, EntityTypeFinder>();
             TryAdd<ICompiledQueryCache, CompiledQueryCache>();
             TryAdd<IAsyncQueryProvider, EntityQueryProvider>();
             TryAdd<IQueryCompiler, QueryCompiler>();
@@ -288,6 +286,7 @@ namespace Microsoft.EntityFrameworkCore.Infrastructure
                 .AddDependencySingleton<QueryTranslationPreprocessorDependencies>()
                 .AddDependencySingleton<QueryTranslationPostprocessorDependencies>()
                 .AddDependencySingleton<EvaluatableExpressionFilterDependencies>()
+                .AddDependencyScoped<EntityTypeFinderDependencies>()
                 .AddDependencyScoped<ProviderConventionSetBuilderDependencies>()
                 .AddDependencyScoped<QueryCompilationContextDependencies>()
                 .AddDependencyScoped<StateManagerDependencies>()

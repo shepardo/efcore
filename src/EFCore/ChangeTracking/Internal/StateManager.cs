@@ -51,6 +51,7 @@ namespace Microsoft.EntityFrameworkCore.ChangeTracking.Internal
         private readonly IModel _model;
         private readonly IDatabase _database;
         private readonly IConcurrencyDetector _concurrencyDetector;
+        private readonly IEntityTypeFinder _entityTypeFinder;
 
         /// <summary>
         ///     This is an internal API that supports the Entity Framework Core infrastructure and not subject to
@@ -73,6 +74,7 @@ namespace Microsoft.EntityFrameworkCore.ChangeTracking.Internal
             EntityFinderFactory = new EntityFinderFactory(
                 dependencies.EntityFinderSource, this, dependencies.SetSource, dependencies.CurrentContext.Context);
             EntityMaterializerSource = dependencies.EntityMaterializerSource;
+            _entityTypeFinder = dependencies.EntityTypeFinder;
 
             if (dependencies.LoggingOptions.IsSensitiveDataLoggingEnabled)
             {
@@ -203,7 +205,7 @@ namespace Microsoft.EntityFrameworkCore.ChangeTracking.Internal
             var entry = TryGetEntry(entity);
             if (entry == null)
             {
-                var entityType = _model.FindRuntimeEntityType(entity.GetType());
+                var entityType = _entityTypeFinder.FindEntityType(entity);
                 if (entityType == null)
                 {
                     if (_model.HasEntityTypeWithDefiningNavigation(entity.GetType()))
@@ -242,7 +244,7 @@ namespace Microsoft.EntityFrameworkCore.ChangeTracking.Internal
             var entry = TryGetEntry(entity, entityType);
             if (entry == null)
             {
-                var runtimeEntityType = _model.FindRuntimeEntityType(entity.GetType());
+                var runtimeEntityType = _entityTypeFinder.FindEntityType(entity);
                 if (runtimeEntityType != null)
                 {
                     if (!entityType.IsAssignableFrom(runtimeEntityType))
@@ -343,11 +345,9 @@ namespace Microsoft.EntityFrameworkCore.ChangeTracking.Internal
                 return existingEntry;
             }
 
-            var clrType = entity.GetType();
-            var entityType = baseEntityType.ClrType == clrType
-                || baseEntityType.HasDefiningNavigation()
-                    ? baseEntityType
-                    : _model.FindRuntimeEntityType(clrType);
+            var entityType = baseEntityType.ClrType == entity.GetType() || baseEntityType.HasDefiningNavigation()
+                ? baseEntityType
+                : _entityTypeFinder.FindEntityType(entity);
 
             var newEntry = valueBuffer.IsEmpty
                 ? _internalEntityEntryFactory.Create(this, entityType, entity)
